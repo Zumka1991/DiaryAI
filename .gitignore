@@ -7,6 +7,11 @@ key.properties
 *.jks
 *.keystore
 
+# ==================== Build artifacts ====================
+downloads/
+*.apk
+*.aab
+
 # ==================== OS / IDE ====================
 .idea/
 .vscode/
