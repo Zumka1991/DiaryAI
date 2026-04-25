@@ -101,7 +101,7 @@ class SecureStore {
   // ---------- настройки ----------
 
   Future<String> getServerUrl() async {
-    return await _s.read(key: _kServerUrl) ?? 'http://localhost:8090';
+    return await _s.read(key: _kServerUrl) ?? 'https://api.diaryai.ru';
   }
 
   Future<void> setServerUrl(String url) => _s.write(key: _kServerUrl, value: url);
