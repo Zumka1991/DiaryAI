@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:cryptography_plus/cryptography_plus.dart';
 
 import '../../core/api/sync_api.dart';
+import '../../core/crypto/cipher.dart';
 import '../../core/db/database.dart';
 import '../categories/categories_repository.dart';
 
@@ -50,19 +51,46 @@ class SyncService {
     final pull = await _entriesApi.pull(since: since);
     var newest = since ?? DateTime.fromMillisecondsSinceEpoch(0).toUtc();
 
+    final masterKey = await _masterKeyProvider();
+    final cipher = DiaryCipher();
+
     for (final r in pull.entries) {
       final existing = await _db.getEntry(r.id);
       if (existing != null && !existing.updatedAt.isBefore(r.updatedAt)) continue;
+
+      final ct = Uint8List.fromList(base64.decode(r.ciphertextB64));
+      final nonce = Uint8List.fromList(base64.decode(r.nonceB64));
+
+      // Расшифровываем payload, чтобы выставить актуальные denormalized
+      // поля category_id и entry_at — иначе UI на этом устройстве будет
+      // показывать стары значения из локальной строки.
+      String? categoryId = existing?.categoryId;
+      DateTime entryAt = existing?.entryAt ?? r.updatedAt;
+      if (masterKey != null) {
+        try {
+          final payload = await cipher.decryptJson(
+            ciphertext: ct, nonce: nonce, masterKey: masterKey,
+          );
+          categoryId = payload['category_id'] as String?;
+          final eaStr = payload['entry_at'] as String?;
+          if (eaStr != null) {
+            entryAt = DateTime.parse(eaStr).toUtc();
+          }
+        } catch (_) {
+          // Не смогли расшифровать (чужим ключом) — оставляем старые поля.
+        }
+      }
+
       await _db.upsertEntry(LocalEntry(
         id: r.id,
-        ciphertext: Uint8List.fromList(base64.decode(r.ciphertextB64)),
-        nonce: Uint8List.fromList(base64.decode(r.nonceB64)),
+        ciphertext: ct,
+        nonce: nonce,
         updatedAt: r.updatedAt,
         deletedAt: r.deletedAt,
         deviceId: r.deviceId,
         dirty: false,
-        categoryId: existing?.categoryId,
-        entryAt: existing?.entryAt ?? r.updatedAt,
+        categoryId: categoryId,
+        entryAt: entryAt,
       ));
       if (r.updatedAt.isAfter(newest)) newest = r.updatedAt;
     }

@@ -55,7 +55,9 @@
       "Bash(cp \"C:/Users/Zumka1991/Documents/GitReps/DiaryAI/app/build/app/outputs/flutter-apk/app-release.apk\" \"C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.1.apk\")",
       "Bash(powershell -Command \"Compress-Archive -Path Release/* -DestinationPath 'C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.1.zip' -Force\")",
       "Bash(cp \"C:/Users/Zumka1991/Documents/GitReps/DiaryAI/app/build/app/outputs/flutter-apk/app-release.apk\" \"C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.2.apk\")",
-      "Bash(powershell -Command \"Compress-Archive -Path Release/* -DestinationPath 'C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.2.zip' -Force\")"
+      "Bash(powershell -Command \"Compress-Archive -Path Release/* -DestinationPath 'C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.2.zip' -Force\")",
+      "Bash(cp build/app/outputs/flutter-apk/app-release.apk ../downloads/DiaryAi-v1.0.3.apk)",
+      "Bash(powershell -Command \"Compress-Archive -Path Release/* -DestinationPath 'C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.3.zip' -Force\")"
     ]
   }
 }
