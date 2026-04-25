@@ -92,5 +92,7 @@ final categoriesListProvider = FutureProvider.autoDispose((ref) async {
   final repo = ref.watch(categoriesRepositoryProvider);
   final key = await ref.watch(authRepositoryProvider).currentMasterKey();
   await repo.ensureDefaults(masterKey: key);
+  // Чистим дубли, оставшиеся от старой версии (где id были случайные).
+  await repo.cleanupDuplicates();
   return repo.list();
 });

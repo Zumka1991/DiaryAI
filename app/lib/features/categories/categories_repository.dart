@@ -12,6 +12,13 @@ class CategoriesRepository {
   final _uuid = const Uuid();
   CategoriesRepository(this._db);
 
+  // Фиксированный namespace для UUIDv5, чтобы дефолтные категории на всех
+  // устройствах имели одинаковые id и не плодили дубли при синхронизации.
+  static const _namespace = '6f7b1e2c-9a4d-4f8e-b3a5-1c2d3e4f5a6b';
+
+  String _deterministicId(String name) =>
+      const Uuid().v5(_namespace, 'default-category:$name');
+
   static const _kDeviceIdKey = 'device_id';
 
   Future<String> _deviceId() async {
@@ -35,16 +42,51 @@ class CategoriesRepository {
 
   Future<void> ensureDefaults({SecretKey? masterKey}) async {
     final existing = await _db.listCategories();
-    if (existing.isNotEmpty) return;
+    final existingNames = existing.map((c) => c.name).toSet();
     for (var i = 0; i < defaultCategories.length; i++) {
       final c = defaultCategories[i];
+      // Не пересоздавать, если категория с таким именем уже есть.
+      if (existingNames.contains(c.name)) continue;
       await _save(
-        id: _uuid.v4(),
+        id: _deterministicId(c.name),
         name: c.name,
         color: c.color,
         sortOrder: i,
         masterKey: masterKey,
       );
+    }
+  }
+
+  /// Дедупликация: для каждого имени оставляем самую старую категорию,
+  /// записи с удалённых дублей перенацеливаем на canonical.
+  /// Вызывать на старте приложения после загрузки профиля.
+  Future<void> cleanupDuplicates() async {
+    final all = await _db.listCategories();
+    final byName = <String, List<LocalCategory>>{};
+    for (final c in all) {
+      byName.putIfAbsent(c.name, () => []).add(c);
+    }
+    for (final group in byName.values) {
+      if (group.length <= 1) continue;
+      group.sort((a, b) {
+        // Канон: тот, у кого id совпадает с детерминированным (если такой есть),
+        // иначе самый старый по updated_at.
+        final detId = _deterministicId(a.name);
+        final aIsDet = a.id == detId;
+        final bIsDet = b.id == detId;
+        if (aIsDet != bIsDet) return aIsDet ? -1 : 1;
+        final ua = a.updatedAt;
+        final ub = b.updatedAt;
+        if (ua == null && ub == null) return a.id.compareTo(b.id);
+        if (ua == null) return 1;
+        if (ub == null) return -1;
+        return ua.compareTo(ub);
+      });
+      final canonical = group.first;
+      for (final dup in group.skip(1)) {
+        await _db.reassignEntriesCategory(dup.id, canonical.id);
+        await _db.deleteCategory(dup.id);
+      }
     }
   }
 

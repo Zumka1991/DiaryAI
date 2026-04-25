@@ -290,6 +290,13 @@ class AppDatabase {
     return LocalCategory.fromMap(rows.first);
   }
 
+  /// Перенацелить все записи с категории oldId на newId (при дедупликации).
+  Future<int> reassignEntriesCategory(String oldId, String newId) async {
+    final db = await _open();
+    return db.update('entries', {'category_id': newId},
+        where: 'category_id = ?', whereArgs: [oldId]);
+  }
+
   Future<List<LocalCategory>> dirtyCategories() async {
     final db = await _open();
     final rows = await db.query('categories',

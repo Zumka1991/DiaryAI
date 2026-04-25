@@ -45,7 +45,17 @@
       "Bash(curl -sI -L \"https://github.com/Zumka1991/DiaryAI/releases/download/v1.0.0/DiaryAi-v1.0.apk\")",
       "Bash(curl -s \"https://api.github.com/repos/Zumka1991/DiaryAI/releases/tags/v1.0.0\")",
       "Bash(curl -sIL \"https://github.com/Zumka1991/DiaryAI/releases/download/v1.0.0/DiaryAi-v1.0.apk\")",
-      "Bash(curl -sIL \"https://github.com/Zumka1991/DiaryAI/releases/download/v1.0.0/DiaryAi-v1.0.zip\")"
+      "Bash(curl -sIL \"https://github.com/Zumka1991/DiaryAI/releases/download/v1.0.0/DiaryAi-v1.0.zip\")",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(flutter build *)",
+      "Bash(mkdir -p \"C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads\")",
+      "Bash(cp \"C:/Users/Zumka1991/Documents/GitReps/DiaryAI/app/build/app/outputs/flutter-apk/app-release.apk\" \"C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.1.apk\")",
+      "Bash(powershell -Command \"Compress-Archive -Path Release/* -DestinationPath 'C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.1.zip' -Force\")",
+      "Bash(cp \"C:/Users/Zumka1991/Documents/GitReps/DiaryAI/app/build/app/outputs/flutter-apk/app-release.apk\" \"C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.2.apk\")",
+      "Bash(powershell -Command \"Compress-Archive -Path Release/* -DestinationPath 'C:/Users/Zumka1991/Documents/GitReps/DiaryAI/downloads/DiaryAi-v1.0.2.zip' -Force\")"
     ]
   }
 }
