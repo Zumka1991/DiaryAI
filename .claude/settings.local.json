@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go version *)",
+      "Bash(flutter --version)",
+      "Bash(flutter create *)",
+      "Bash(flutter pub *)",
+      "Bash(dart run *)",
+      "Bash(grep -B1 -A2 \"name: build_runner$\" pubspec.lock)",
+      "Bash(grep -A3 \"name: build_runner$\" pubspec.lock)",
+      "Bash(grep -A3 \"name: drift_dev$\" pubspec.lock)",
+      "Bash(grep -A3 \"name: drift$\" pubspec.lock)",
+      "Bash(grep -B1 -A5 \"name: build_runner$\" pubspec.lock)",
+      "Bash(grep -B1 -A5 \"name: drift_dev$\" pubspec.lock)",
+      "Bash(grep -B1 -A5 \"name: drift$\" pubspec.lock)",
+      "Bash(dart --enable-experiment=native-assets run build_runner build --delete-conflicting-outputs)",
+      "Bash(dart --help)",
+      "Bash(dart build *)",
+      "Bash(DART_VM_OPTIONS=\"\" dart run --no-sound-null-safety build_runner build)",
+      "Bash(grep -A3 \"name: sqlite3$\" pubspec.lock)",
+      "Bash(flutter analyze *)",
+      "Bash(flutter config *)",
+      "Bash(flutter doctor *)",
+      "Bash(flutter devices *)",
+      "Bash(docker compose *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8091)"
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+services:
+  site:
+    build: .
+    container_name: diaryai_site
+    ports:
+      - "8091:80"   # внешний 8091 чтобы не конфликтовать с локальными портами
+    restart: unless-stopped

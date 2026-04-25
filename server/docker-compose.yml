@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: diaryai_postgres
+    environment:
+      POSTGRES_USER: diary
+      POSTGRES_PASSWORD: diary_dev_password
+      POSTGRES_DB: diary
+    ports:
+      - "5433:5432"   # внешний 5433 чтобы не конфликтовать с локальным Postgres
+    volumes:
+      - diary_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U diary -d diary"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    container_name: diaryai_migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://diary:diary_dev_password@postgres:5432/diary?sslmode=disable"
+      - "up"
+    restart: "no"
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: diaryai_server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DIARY_HTTP_ADDR: ":8080"
+      DIARY_DATABASE_URL: "postgres://diary:diary_dev_password@postgres:5432/diary?sslmode=disable"
+      DIARY_JWT_SECRET: "${DIARY_JWT_SECRET:-dev-secret-change-me-please-32chars-min}"
+      DIARY_JWT_TTL_HOURS: "720"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+    ports:
+      - "8090:8080"   # внешний 8090, внутри контейнера по-прежнему 8080
+    restart: unless-stopped
+
+volumes:
+  diary_pgdata:

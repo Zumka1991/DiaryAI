@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DiaryAI — зашифрованный дневник с ИИ-анализом</title>
+  <meta name="description" content="Личный дневник с end-to-end шифрованием. Работает офлайн. ИИ-анализ записей с пониманием контекста. Открытый код.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="nav container">
+    <a href="#" class="brand">
+      <span class="logo">
+        <svg viewBox="0 0 100 100" width="36" height="36" aria-hidden="true">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#B8A4E3"/>
+              <stop offset="100%" stop-color="#8770C7"/>
+            </linearGradient>
+          </defs>
+          <rect x="2" y="2" width="96" height="96" rx="26" fill="url(#lg)"/>
+          <path d="M50 60 Q30 55 18 48 L18 32 Q30 34 50 44 Z" fill="white"/>
+          <path d="M50 60 Q70 55 82 48 L82 32 Q70 34 50 44 Z" fill="white"/>
+          <line x1="50" y1="44" x2="50" y2="60" stroke="white" stroke-opacity="0.55" stroke-width="1.5"/>
+          <path d="M62 22 L65 28 L71 30 L65 32 L62 38 L59 32 L53 30 L59 28 Z" fill="white"/>
+          <path d="M48 28 L49.5 30.5 L52 31.5 L49.5 32.5 L48 35 L46.5 32.5 L44 31.5 L46.5 30.5 Z" fill="white" opacity="0.85"/>
+        </svg>
+      </span>
+      <span class="brand-name">DiaryAI</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features">Возможности</a>
+      <a href="#download">Скачать</a>
+      <a href="https://github.com/" class="github-link" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+          <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.16-.02-2.11-3.2.7-3.87-1.36-3.87-1.36-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.24 3.34.95.1-.74.4-1.24.73-1.53-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.18-3.09-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.18a10.93 10.93 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.58.23 2.75.11 3.04.74.8 1.18 1.83 1.18 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .31.21.68.8.56C20.21 21.39 23.5 17.07 23.5 12c0-6.35-5.15-11.5-11.5-11.5z"/>
+        </svg>
+        GitHub
+      </a>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- HERO -->
+    <section class="hero container">
+      <div class="hero-text">
+        <span class="badge">Открытый код · End-to-end шифрование</span>
+        <h1>Личный дневник, который никто не прочитает.<br>Кроме вас.</h1>
+        <p class="lead">
+          DiaryAI — зашифрованный дневник, который работает офлайн и опционально синхронизирует записи между устройствами.
+          Внутри — ИИ-собеседник, который читает между строк и видит, как меняются ваши мысли со временем.
+        </p>
+        <div class="cta-row">
+          <a href="#download" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+              <path d="M12 3v12.6l4.3-4.3 1.4 1.4L12 18.4 6.3 12.7l1.4-1.4L12 15.6V3h0zM5 20h14v2H5v-2z"/>
+            </svg>
+            Скачать приложение
+          </a>
+          <a href="https://github.com/" class="btn btn-ghost" target="_blank" rel="noopener">Исходный код</a>
+        </div>
+        <ul class="hero-bullets">
+          <li><span class="dot"></span>Работает без интернета по умолчанию</li>
+          <li><span class="dot"></span>Сервер не видит ваших записей — только зашифрованные блобы</li>
+          <li><span class="dot"></span>Свой ключ OpenRouter? Можно подключить и не зависеть от нас</li>
+        </ul>
+      </div>
+      <div class="hero-card-wrap">
+        <div class="hero-card">
+          <div class="card-header">
+            <span class="card-date">Сегодня · 21:14</span>
+            <span class="card-tag tag-personal">Личное</span>
+          </div>
+          <h3 class="card-title">Странный был день</h3>
+          <p class="card-body">
+            На встрече снова поймал себя на том, что молчу, когда хочется сказать. Потом всю дорогу
+            домой прокручивал в голове, что мог бы ответить. Это уже какая-то закономерность.
+          </p>
+          <div class="ai-card">
+            <div class="ai-head">
+              <span class="ai-icon">✦</span>
+              <span>Анализ ИИ</span>
+            </div>
+            <p>
+              Похожее ты записывал две недели назад — после совещания с клиентом. И тогда тоже
+              «не успел сказать». Может быть, это не про конкретную ситуацию, а про то, что
+              в групповых разговорах ты предпочитаешь обдумывать, чем реагировать. Это не недостаток —
+              просто другой темп.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features" class="features container">
+      <h2 class="section-title">Что внутри</h2>
+      <div class="grid">
+        <div class="feature">
+          <div class="feature-icon icon-lock">🔒</div>
+          <h3>End-to-end шифрование</h3>
+          <p>
+            Ваш пароль никогда не уходит с устройства. Записи шифруются ключом, который выводится
+            из пароля локально через Argon2id. Сервер хранит только зашифрованные блобы и не может
+            их прочитать.
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-cloud">☁️</div>
+          <h3>Local-first, синк опционально</h3>
+          <p>
+            Дневник работает полностью офлайн — сервер не нужен. Синхронизация между устройствами
+            включается одним переключателем, когда вам понадобится.
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-ai">✦</div>
+          <h3>ИИ с памятью контекста</h3>
+          <p>
+            При анализе ИИ видит не только текущую запись, но и соседние — до 5 до и 5 после.
+            Замечает паттерны, изменения, повторяющиеся темы. Говорит на русском.
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-key">🔑</div>
+          <h3>Свой ключ OpenRouter</h3>
+          <p>
+            Не хотите зависеть от нашего лимита? Подключите свой ключ OpenRouter или RouterAI.ru
+            в настройках. Запросы будут идти напрямую к провайдеру, минуя наш сервер.
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-categories">🏷</div>
+          <h3>Категории и заголовки</h3>
+          <p>
+            Раскладывайте записи по категориям. Ставьте короткие заголовки. Дневник остаётся
+            таким аккуратным, каким вы хотите его видеть.
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-open">⌨</div>
+          <h3>Открытый код</h3>
+          <p>
+            Весь код — на GitHub. Вы можете прочитать, как именно ваши данные шифруются и хранятся.
+            Можно собрать самому или запустить свой сервер синхронизации.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- DOWNLOAD -->
+    <section id="download" class="download container">
+      <h2 class="section-title">Скачать</h2>
+      <p class="section-sub">Выберите платформу. Бета — приложения подписаны автором, обновления через GitHub Releases.</p>
+      <div class="downloads">
+        <a class="download-card" href="https://github.com/" target="_blank" rel="noopener">
+          <div class="dl-icon">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" aria-hidden="true">
+              <path d="M3 5.479L10.5 4.5v6.75H3V5.479zM3 12.75h7.5v6.75L3 18.521V12.75zm8.25-8.327L21 3v8.25h-9.75V4.423zM21 12.75V21l-9.75-1.423V12.75H21z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="dl-platform">Windows</div>
+            <div class="dl-meta">.exe · скоро</div>
+          </div>
+          <span class="dl-arrow">→</span>
+        </a>
+        <a class="download-card" href="https://github.com/" target="_blank" rel="noopener">
+          <div class="dl-icon">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" aria-hidden="true">
+              <path d="M17.5 11h-11v-.05a5.55 5.55 0 0 1 5.42-5.5l.83-1.55a.4.4 0 1 0-.7-.4l-.79 1.46a6.7 6.7 0 0 0-2.92.01L7.55 3.5a.4.4 0 1 0-.7.4l.83 1.55A5.55 5.55 0 0 0 6.5 10.95V11h11v-.05a5.5 5.5 0 0 0-1.18-3.4l.83-1.55a.4.4 0 1 0-.7-.4L15.66 7A6.7 6.7 0 0 0 17.5 11zM9.2 8.4a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2zm5.6 0a.6.6 0 1 1 0-1.2.6.6 0 0 1 0 1.2zM5 12.5h14v6.25a1.75 1.75 0 0 1-1.75 1.75H6.75A1.75 1.75 0 0 1 5 18.75V12.5zm-2 .25v5.5a1.75 1.75 0 1 0 3.5 0v-5.5a1.75 1.75 0 1 0-3.5 0zm14.5 0v5.5a1.75 1.75 0 1 0 3.5 0v-5.5a1.75 1.75 0 1 0-3.5 0zM8.5 21v1.25a1.75 1.75 0 1 0 3.5 0V21h-3.5zm4.5 0v1.25a1.75 1.75 0 1 0 3.5 0V21H13z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="dl-platform">Android</div>
+            <div class="dl-meta">.apk · скоро</div>
+          </div>
+          <span class="dl-arrow">→</span>
+        </a>
+      </div>
+      <p class="note">
+        iOS и macOS — в планах. Веб-версия появится позже на app.diaryai.ru.
+      </p>
+    </section>
+
+    <!-- TRUST -->
+    <section class="trust container">
+      <div class="trust-card">
+        <h2>Почему это безопаснее, чем «обычный дневник»?</h2>
+        <ul>
+          <li><strong>Сервер не знает ваш пароль.</strong> Из пароля локально выводятся два ключа: один шифрует записи (никогда не покидает устройство), другой используется для логина (его аналог хеша лежит на сервере).</li>
+          <li><strong>Синхронизация — это просто перенос блобов.</strong> Сервер видит зашифрованный байт-салат и метаданные (когда обновлено). Ни текста, ни заголовка, ни даже названия категории.</li>
+          <li><strong>ИИ-анализ — отдельная история.</strong> На время запроса записи расшифровываются на устройстве и отправляются через наш прокси к OpenRouter. Сервер не логирует и не сохраняет содержимое. Если этого недостаточно — подключите свой ключ.</li>
+          <li><strong>Восстановить пароль нельзя.</strong> Это плата за то, что мы не можем вашу базу прочитать. Поэтому пароль придётся помнить.</li>
+        </ul>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer container">
+    <div class="footer-left">
+      <span class="brand-name">DiaryAI</span>
+      <span class="footer-meta">© 2026 · Открытый код</span>
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+      <a href="#features">Возможности</a>
+      <a href="#download">Скачать</a>
+    </div>
+  </footer>
+
+</body>
+</html>
