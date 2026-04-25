@@ -29,7 +29,9 @@ class DiaryApp extends ConsumerWidget {
       title: 'DiaryAI',
       theme: buildLightTheme(),
       darkTheme: buildDarkTheme(),
-      themeMode: ThemeMode.system,
+      // Принудительно тёмная — наша фирменная палитра.
+      // (Светлую можно вернуть переключателем в настройках в будущем.)
+      themeMode: ThemeMode.dark,
       routerConfig: ref.watch(routerProvider),
       debugShowCheckedModeBanner: false,
     );

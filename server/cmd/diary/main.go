@@ -43,6 +43,7 @@ func main() {
 
 	authSvc := auth.New(pool, cfg.JWTSecret, cfg.JWTTTL)
 	syncSvc := syncsvc.New(pool)
+	syncCatSvc := syncsvc.NewFor(pool, "categories", "categories")
 	aiSvc := ai.New(pool, cfg.OpenRouterAPIKey)
 
 	r := chi.NewRouter()
@@ -63,7 +64,12 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.JWTSecret))
 		r.Route("/sync", func(r chi.Router) {
+			// /sync/push, /sync/pull — записи (старый API, v1.0 совместимость)
 			syncSvc.Routes(r)
+			// /sync/categories/push, /sync/categories/pull — категории (новый)
+			r.Route("/categories", func(r chi.Router) {
+				syncCatSvc.Routes(r)
+			})
 		})
 		r.Route("/ai", func(r chi.Router) {
 			aiSvc.Routes(r)

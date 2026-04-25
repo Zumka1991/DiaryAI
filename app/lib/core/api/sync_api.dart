@@ -47,11 +47,19 @@ class PullResult {
 
 class SyncApi {
   final ApiClient _api;
-  SyncApi(this._api);
+  final String _basePath; // /sync (entries) или /sync/categories
+  final String _payloadKey; // 'entries' или 'categories'
 
-  Future<int> push(List<RemoteEntry> entries) async {
-    final r = await _api.dio.post('/sync/push', data: jsonEncode({
-      'entries': entries.map((e) => e.toJson()).toList(),
+  SyncApi(this._api) : _basePath = '/sync', _payloadKey = 'entries';
+
+  /// Альтернативный конструктор для категорий.
+  SyncApi.categories(this._api)
+      : _basePath = '/sync/categories',
+        _payloadKey = 'categories';
+
+  Future<int> push(List<RemoteEntry> items) async {
+    final r = await _api.dio.post('$_basePath/push', data: jsonEncode({
+      _payloadKey: items.map((e) => e.toJson()).toList(),
     }));
     return (r.data['accepted'] as num).toInt();
   }
@@ -59,7 +67,7 @@ class SyncApi {
   Future<PullResult> pull({DateTime? since}) async {
     final qp = <String, dynamic>{};
     if (since != null) qp['since'] = since.toUtc().toIso8601String();
-    final r = await _api.dio.get('/sync/pull', queryParameters: qp);
+    final r = await _api.dio.get('$_basePath/pull', queryParameters: qp);
     final list = (r.data['entries'] as List).cast<Map<String, dynamic>>();
     return PullResult(
       list.map(RemoteEntry.fromJson).toList(),

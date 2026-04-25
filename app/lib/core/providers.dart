@@ -19,6 +19,8 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 
 final authApiProvider = Provider<AuthApi>((ref) => AuthApi(ref.watch(apiClientProvider)));
 final syncApiProvider = Provider<SyncApi>((ref) => SyncApi(ref.watch(apiClientProvider)));
+final syncCategoriesApiProvider =
+    Provider<SyncApi>((ref) => SyncApi.categories(ref.watch(apiClientProvider)));
 final aiApiProvider = Provider<AiApi>((ref) => AiApi(ref.watch(apiClientProvider)));
 
 final databaseProvider = Provider<AppDatabase>((ref) {
@@ -44,7 +46,14 @@ final categoriesRepositoryProvider = Provider<CategoriesRepository>((ref) {
 });
 
 final syncServiceProvider = Provider<SyncService>((ref) {
-  return SyncService(ref.watch(syncApiProvider), ref.watch(databaseProvider));
+  final auth = ref.watch(authRepositoryProvider);
+  return SyncService(
+    ref.watch(syncApiProvider),
+    ref.watch(syncCategoriesApiProvider),
+    ref.watch(databaseProvider),
+    ref.watch(categoriesRepositoryProvider),
+    auth.currentMasterKey,
+  );
 });
 
 /// Есть ли локальный профиль (созданный или восстановленный).
@@ -81,6 +90,7 @@ final entryProvider =
 
 final categoriesListProvider = FutureProvider.autoDispose((ref) async {
   final repo = ref.watch(categoriesRepositoryProvider);
-  await repo.ensureDefaults();
+  final key = await ref.watch(authRepositoryProvider).currentMasterKey();
+  await repo.ensureDefaults(masterKey: key);
   return repo.list();
 });

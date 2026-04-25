@@ -12,7 +12,6 @@ class CategoriesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final asyn = ref.watch(categoriesListProvider);
     return Scaffold(
-
       appBar: AppBar(title: const Text('Категории')),
       body: GradientBackground(
         child: SafeArea(
@@ -32,15 +31,19 @@ class CategoriesScreen extends ConsumerWidget {
                       ],
                       onSelected: (v) async {
                         final repo = ref.read(categoriesRepositoryProvider);
+                        final key = await ref.read(authRepositoryProvider).currentMasterKey();
+                        if (key == null) return;
                         if (v == 'rename') {
                           final name = await _prompt(context, 'Новое название', initial: c.name);
                           if (name != null && name.isNotEmpty) {
-                            await repo.rename(c.id, name);
+                            await repo.rename(c.id, name, masterKey: key);
                             ref.invalidate(categoriesListProvider);
+                            _maybeSync(ref);
                           }
                         } else if (v == 'delete') {
                           await repo.delete(c.id);
                           ref.invalidate(categoriesListProvider);
+                          _maybeSync(ref);
                         }
                       },
                     ),
@@ -67,15 +70,24 @@ class CategoriesScreen extends ConsumerWidget {
           elevation: 0,
           onPressed: () async {
             final name = await _prompt(context, 'Название категории');
-            if (name != null && name.isNotEmpty) {
-              await ref.read(categoriesRepositoryProvider).add(name);
-              ref.invalidate(categoriesListProvider);
-            }
+            if (name == null || name.isEmpty) return;
+            final key = await ref.read(authRepositoryProvider).currentMasterKey();
+            if (key == null) return;
+            await ref.read(categoriesRepositoryProvider).add(name, masterKey: key);
+            ref.invalidate(categoriesListProvider);
+            _maybeSync(ref);
           },
           child: const Icon(Icons.add, color: Colors.white),
         ),
       ),
     );
+  }
+
+  Future<void> _maybeSync(WidgetRef ref) async {
+    final enabled = await ref.read(authRepositoryProvider).isSyncEnabled();
+    if (enabled) {
+      ref.read(syncServiceProvider).syncOnce().ignore();
+    }
   }
 }
 

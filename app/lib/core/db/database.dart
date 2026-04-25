@@ -63,13 +63,42 @@ class LocalCategory {
   final String name;
   final int color;
   final int sortOrder;
-  LocalCategory({required this.id, required this.name, required this.color, required this.sortOrder});
+  // Поля для синхронизации (могут быть пусты у категорий из старой v1.0).
+  final Uint8List? ciphertext;
+  final Uint8List? nonce;
+  final DateTime? updatedAt;
+  final DateTime? deletedAt;
+  final String? deviceId;
+  final bool dirty;
+
+  LocalCategory({
+    required this.id,
+    required this.name,
+    required this.color,
+    required this.sortOrder,
+    this.ciphertext,
+    this.nonce,
+    this.updatedAt,
+    this.deletedAt,
+    this.deviceId,
+    this.dirty = false,
+  });
 
   factory LocalCategory.fromMap(Map<String, Object?> m) => LocalCategory(
         id: m['id'] as String,
         name: m['name'] as String,
         color: m['color'] as int,
         sortOrder: m['sort_order'] as int,
+        ciphertext: m['ciphertext'] as Uint8List?,
+        nonce: m['nonce'] as Uint8List?,
+        updatedAt: m['updated_at'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(m['updated_at'] as int, isUtc: true),
+        deletedAt: m['deleted_at'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(m['deleted_at'] as int, isUtc: true),
+        deviceId: m['device_id'] as String?,
+        dirty: ((m['dirty'] as int?) ?? 0) != 0,
       );
 }
 
@@ -82,7 +111,7 @@ class AppDatabase {
     final path = p.join(dir.path, 'diaryai.sqlite');
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE entries (
@@ -103,7 +132,13 @@ class AppDatabase {
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             color INTEGER NOT NULL DEFAULT ${0xFF6B7280},
-            sort_order INTEGER NOT NULL DEFAULT 0
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            ciphertext BLOB,
+            nonce BLOB,
+            updated_at INTEGER,
+            deleted_at INTEGER,
+            device_id TEXT,
+            dirty INTEGER NOT NULL DEFAULT 1
           )
         ''');
         await db.execute('''
@@ -112,6 +147,17 @@ class AppDatabase {
             value TEXT NOT NULL
           )
         ''');
+      },
+      onUpgrade: (db, oldV, newV) async {
+        if (oldV < 2) {
+          // Добавляем поля для синхронизации категорий.
+          await db.execute('ALTER TABLE categories ADD COLUMN ciphertext BLOB');
+          await db.execute('ALTER TABLE categories ADD COLUMN nonce BLOB');
+          await db.execute('ALTER TABLE categories ADD COLUMN updated_at INTEGER');
+          await db.execute('ALTER TABLE categories ADD COLUMN deleted_at INTEGER');
+          await db.execute('ALTER TABLE categories ADD COLUMN device_id TEXT');
+          await db.execute('ALTER TABLE categories ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1');
+        }
       },
     );
     return _db!;
@@ -229,39 +275,60 @@ class AppDatabase {
 
   Future<List<LocalCategory>> listCategories() async {
     final db = await _open();
-    final rows = await db.query('categories', orderBy: 'sort_order ASC');
+    final rows = await db.query(
+      'categories',
+      where: 'deleted_at IS NULL',
+      orderBy: 'sort_order ASC',
+    );
     return rows.map(LocalCategory.fromMap).toList();
   }
 
-  Future<void> upsertCategory({
-    required String id,
-    String? name,
-    int? color,
-    int? sortOrder,
-  }) async {
+  Future<LocalCategory?> getCategory(String id) async {
     final db = await _open();
-    final existing = await db.query('categories', where: 'id = ?', whereArgs: [id], limit: 1);
-    if (existing.isEmpty) {
-      await db.insert('categories', {
-        'id': id,
-        'name': name ?? '',
-        'color': color ?? 0xFF6B7280,
-        'sort_order': sortOrder ?? 0,
-      });
-    } else {
-      final patch = <String, Object?>{};
-      if (name != null) patch['name'] = name;
-      if (color != null) patch['color'] = color;
-      if (sortOrder != null) patch['sort_order'] = sortOrder;
-      if (patch.isNotEmpty) {
-        await db.update('categories', patch, where: 'id = ?', whereArgs: [id]);
-      }
-    }
+    final rows = await db.query('categories', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return null;
+    return LocalCategory.fromMap(rows.first);
+  }
+
+  Future<List<LocalCategory>> dirtyCategories() async {
+    final db = await _open();
+    final rows = await db.query('categories',
+        where: 'dirty = 1 AND ciphertext IS NOT NULL');
+    return rows.map(LocalCategory.fromMap).toList();
+  }
+
+  Future<void> markCategorySynced(String id) async {
+    final db = await _open();
+    await db.update('categories', {'dirty': 0}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> upsertCategoryRow(LocalCategory c) async {
+    final db = await _open();
+    await db.insert('categories', {
+      'id': c.id,
+      'name': c.name,
+      'color': c.color,
+      'sort_order': c.sortOrder,
+      'ciphertext': c.ciphertext,
+      'nonce': c.nonce,
+      'updated_at': c.updatedAt?.toUtc().millisecondsSinceEpoch,
+      'deleted_at': c.deletedAt?.toUtc().millisecondsSinceEpoch,
+      'device_id': c.deviceId,
+      'dirty': c.dirty ? 1 : 0,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> deleteCategory(String id) async {
+    // Soft-delete для синхронизации: помечаем deleted_at, dirty=1.
     final db = await _open();
-    await db.delete('categories', where: 'id = ?', whereArgs: [id]);
+    final row = await db.query('categories', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (row.isEmpty) return;
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch;
+    await db.update('categories', {
+      'deleted_at': now,
+      'updated_at': now,
+      'dirty': 1,
+    }, where: 'id = ?', whereArgs: [id]);
   }
 
   // --- meta ---

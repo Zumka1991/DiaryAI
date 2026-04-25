@@ -3,6 +3,7 @@ package sync
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -15,12 +16,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Service синхронизирует одну таблицу, в которой строки — opaque blob'ы:
+// id, user_id, ciphertext, nonce, updated_at, deleted_at, device_id.
+// Используется и для entries, и для categories — структура одинаковая.
 type Service struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	tableName string
+	listKey   string // ключ массива в JSON: "entries" / "categories"
 }
 
 func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+	return &Service{pool: pool, tableName: "entries", listKey: "entries"}
+}
+
+// NewFor создаёт сервис для произвольной таблицы (например "categories").
+func NewFor(pool *pgxpool.Pool, table, listKey string) *Service {
+	return &Service{pool: pool, tableName: table, listKey: listKey}
 }
 
 func (s *Service) Routes(r chi.Router) {
@@ -30,17 +41,13 @@ func (s *Service) Routes(r chi.Router) {
 
 // --- DTO ---
 
-type entryDTO struct {
+type itemDTO struct {
 	ID         string  `json:"id"`
-	Ciphertext string  `json:"ciphertext"`           // base64
-	Nonce      string  `json:"nonce"`                // base64
-	UpdatedAt  string  `json:"updated_at"`           // RFC3339
-	DeletedAt  *string `json:"deleted_at,omitempty"` // RFC3339
+	Ciphertext string  `json:"ciphertext"`
+	Nonce      string  `json:"nonce"`
+	UpdatedAt  string  `json:"updated_at"`
+	DeletedAt  *string `json:"deleted_at,omitempty"`
 	DeviceID   string  `json:"device_id"`
-}
-
-type pushRequest struct {
-	Entries []entryDTO `json:"entries"`
 }
 
 type pushResponse struct {
@@ -48,15 +55,15 @@ type pushResponse struct {
 }
 
 type pullResponse struct {
-	Entries []entryDTO `json:"entries"`
-	HasMore bool       `json:"has_more"`
-	NextSince string   `json:"next_since,omitempty"`
+	Entries   []itemDTO `json:"entries"`
+	HasMore   bool      `json:"has_more"`
+	NextSince string    `json:"next_since,omitempty"`
 }
 
-// --- handlers ---
-
-const maxPushBatch = 500
-const maxPullBatch = 500
+const (
+	maxPushBatch = 500
+	maxPullBatch = 500
+)
 
 func (s *Service) handlePush(w http.ResponseWriter, r *http.Request) {
 	uid, ok := auth.UserID(r.Context())
@@ -65,18 +72,24 @@ func (s *Service) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req pushRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	// Принимаем массив либо в "entries", либо в нашем listKey — оба варианта,
+	// чтобы клиент не путался при общем коде синка.
+	var raw map[string]any
+	if err := httpx.DecodeJSON(r, &raw); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "bad_json", err.Error())
 		return
 	}
-	if len(req.Entries) == 0 {
+	listAny, ok := raw[s.listKey].([]any)
+	if !ok {
+		listAny, _ = raw["entries"].([]any)
+	}
+	if len(listAny) == 0 {
 		httpx.WriteJSON(w, http.StatusOK, pushResponse{Accepted: 0})
 		return
 	}
-	if len(req.Entries) > maxPushBatch {
+	if len(listAny) > maxPushBatch {
 		httpx.WriteError(w, http.StatusBadRequest, "batch_too_large",
-			"max "+strconv.Itoa(maxPushBatch)+" entries per push")
+			"max "+strconv.Itoa(maxPushBatch)+" items per push")
 		return
 	}
 
@@ -87,61 +100,74 @@ func (s *Service) handlePush(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
+	insertSQL := fmt.Sprintf(`
+		INSERT INTO %s (id, user_id, ciphertext, nonce, updated_at, deleted_at, device_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (id) DO UPDATE SET
+			ciphertext = EXCLUDED.ciphertext,
+			nonce      = EXCLUDED.nonce,
+			updated_at = EXCLUDED.updated_at,
+			deleted_at = EXCLUDED.deleted_at,
+			device_id  = EXCLUDED.device_id
+		WHERE %s.user_id = EXCLUDED.user_id
+		  AND %s.updated_at < EXCLUDED.updated_at
+	`, s.tableName, s.tableName, s.tableName)
+
 	accepted := 0
-	for i, e := range req.Entries {
-		id, err := uuid.Parse(e.ID)
+	for i, raw := range listAny {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			httpx.WriteError(w, http.StatusBadRequest, "bad_item",
+				"item["+strconv.Itoa(i)+"]: not an object")
+			return
+		}
+		idStr, _ := m["id"].(string)
+		id, err := uuid.Parse(idStr)
 		if err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, "bad_id",
-				"entry["+strconv.Itoa(i)+"]: invalid uuid")
+				"item["+strconv.Itoa(i)+"]: invalid uuid")
 			return
 		}
-		ct, err := base64.StdEncoding.DecodeString(e.Ciphertext)
+		ctStr, _ := m["ciphertext"].(string)
+		ct, err := base64.StdEncoding.DecodeString(ctStr)
 		if err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, "bad_ciphertext",
-				"entry["+strconv.Itoa(i)+"]: invalid base64")
+				"item["+strconv.Itoa(i)+"]: invalid base64")
 			return
 		}
-		nonce, err := base64.StdEncoding.DecodeString(e.Nonce)
+		nonceStr, _ := m["nonce"].(string)
+		nonce, err := base64.StdEncoding.DecodeString(nonceStr)
 		if err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, "bad_nonce",
-				"entry["+strconv.Itoa(i)+"]: invalid nonce")
+				"item["+strconv.Itoa(i)+"]: invalid nonce")
 			return
 		}
-		updatedAt, err := time.Parse(time.RFC3339Nano, e.UpdatedAt)
+		updatedStr, _ := m["updated_at"].(string)
+		updatedAt, err := time.Parse(time.RFC3339Nano, updatedStr)
 		if err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, "bad_updated_at",
-				"entry["+strconv.Itoa(i)+"]: invalid time")
+				"item["+strconv.Itoa(i)+"]: invalid time")
 			return
 		}
 		var deletedAt *time.Time
-		if e.DeletedAt != nil {
-			t, err := time.Parse(time.RFC3339Nano, *e.DeletedAt)
+		if delStr, hasDel := m["deleted_at"].(string); hasDel && delStr != "" {
+			t, err := time.Parse(time.RFC3339Nano, delStr)
 			if err != nil {
 				httpx.WriteError(w, http.StatusBadRequest, "bad_deleted_at",
-					"entry["+strconv.Itoa(i)+"]: invalid time")
+					"item["+strconv.Itoa(i)+"]: invalid time")
 				return
 			}
 			deletedAt = &t
 		}
-		if e.DeviceID == "" {
+		deviceID, _ := m["device_id"].(string)
+		if deviceID == "" {
 			httpx.WriteError(w, http.StatusBadRequest, "bad_device_id",
-				"entry["+strconv.Itoa(i)+"]: device_id required")
+				"item["+strconv.Itoa(i)+"]: device_id required")
 			return
 		}
 
-		// Last-write-wins: вставляем или обновляем, если входящий updated_at новее.
-		ct2, err := tx.Exec(r.Context(), `
-			INSERT INTO entries (id, user_id, ciphertext, nonce, updated_at, deleted_at, device_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (id) DO UPDATE SET
-				ciphertext = EXCLUDED.ciphertext,
-				nonce      = EXCLUDED.nonce,
-				updated_at = EXCLUDED.updated_at,
-				deleted_at = EXCLUDED.deleted_at,
-				device_id  = EXCLUDED.device_id
-			WHERE entries.user_id = EXCLUDED.user_id
-			  AND entries.updated_at < EXCLUDED.updated_at
-		`, id, uid, ct, nonce, updatedAt, deletedAt, e.DeviceID)
+		ct2, err := tx.Exec(r.Context(), insertSQL,
+			id, uid, ct, nonce, updatedAt, deletedAt, deviceID)
 		if err != nil {
 			httpx.WriteError(w, http.StatusInternalServerError, "db_error", err.Error())
 			return
@@ -165,7 +191,7 @@ func (s *Service) handlePull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	since := time.Time{} // если не указан — отдаём всё с начала времён
+	since := time.Time{}
 	if v := r.URL.Query().Get("since"); v != "" {
 		t, err := time.Parse(time.RFC3339Nano, v)
 		if err != nil {
@@ -175,20 +201,22 @@ func (s *Service) handlePull(w http.ResponseWriter, r *http.Request) {
 		since = t
 	}
 
-	rows, err := s.pool.Query(r.Context(), `
+	selectSQL := fmt.Sprintf(`
 		SELECT id, ciphertext, nonce, updated_at, deleted_at, device_id
-		FROM entries
+		FROM %s
 		WHERE user_id = $1 AND updated_at > $2
 		ORDER BY updated_at ASC
 		LIMIT $3
-	`, uid, since, maxPullBatch+1)
+	`, s.tableName)
+
+	rows, err := s.pool.Query(r.Context(), selectSQL, uid, since, maxPullBatch+1)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		httpx.WriteError(w, http.StatusInternalServerError, "db_error", err.Error())
 		return
 	}
 	defer rows.Close()
 
-	out := make([]entryDTO, 0, maxPullBatch)
+	out := make([]itemDTO, 0, maxPullBatch)
 	for rows.Next() {
 		var (
 			id        uuid.UUID
@@ -201,7 +229,7 @@ func (s *Service) handlePull(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusInternalServerError, "db_error", err.Error())
 			return
 		}
-		dto := entryDTO{
+		dto := itemDTO{
 			ID:         id.String(),
 			Ciphertext: base64.StdEncoding.EncodeToString(ct),
 			Nonce:      base64.StdEncoding.EncodeToString(nonce),
