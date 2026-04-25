@@ -1,0 +1,4 @@
+storePassword=ВПИШИ_ПАРОЛЬ_ОТ_KEYSTORE
+keyPassword=ВПИШИ_ПАРОЛЬ_ОТ_KEYSTORE
+keyAlias=diaryai
+storeFile=C:/Users/Zumka1991/diaryai-release.jks
