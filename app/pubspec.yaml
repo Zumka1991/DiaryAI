@@ -1,7 +1,7 @@
 name: diaryai
 description: "Encrypted diary with AI analysis"
 publish_to: 'none'
-version: 1.0.3+4
+version: 1.0.4+5
 
 environment:
   sdk: ^3.10.8
@@ -40,6 +40,7 @@ dependencies:
 
   # Дизайн
   google_fonts: ^6.2.1
+  record: 6.2.0
 
 dev_dependencies:
   flutter_test:

@@ -1,9 +1,16 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:record/record.dart';
+
+import 'package:dio/dio.dart';
 
 import '../../../core/api/ai_api.dart';
+import '../../../core/audio/wav_encoder.dart';
 import '../../../core/providers.dart';
 import '../../../core/theme.dart';
 import '../../../core/widgets/gradient_background.dart';
@@ -19,14 +26,23 @@ class EntryEditorScreen extends ConsumerStatefulWidget {
 }
 
 class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
+  static const _voiceSampleRate = 16000;
+  static const _voiceChannels = 1;
+
   final _title = TextEditingController();
   final _text = TextEditingController();
+  final _recorder = AudioRecorder();
+  StreamSubscription<Uint8List>? _recordingSub;
+  Timer? _recordingTimer;
+  final List<Uint8List> _recordingChunks = [];
   DateTime _entryAt = DateTime.now();
   String? _categoryId;
   String _aiComment = '';
   bool _wantAnalyze = false;
   bool _loaded = false;
   bool _busy = false;
+  bool _recording = false;
+  Duration _recordingDuration = Duration.zero;
   String? _busyMessage;
 
   @override
@@ -39,6 +55,9 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
 
   @override
   void dispose() {
+    _recordingTimer?.cancel();
+    _recordingSub?.cancel();
+    _recorder.dispose();
     _title.dispose();
     _text.dispose();
     super.dispose();
@@ -51,7 +70,11 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
       if (entry == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Запись не найдена. Возможно, нужна синхронизация.')),
+            const SnackBar(
+              content: Text(
+                'Запись не найдена. Возможно, нужна синхронизация.',
+              ),
+            ),
           );
           context.pop();
         }
@@ -60,7 +83,10 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
       if (mounted) {
         _title.text = entry.title;
         _text.text = entry.text;
-        _entryAt = entry.entryAt;
+        // entry.entryAt хранится как wall-clock UTC. Распаковываем компоненты
+        // в local DateTime, чтобы пикеры даты/времени работали корректно.
+        final ea = entry.entryAt;
+        _entryAt = DateTime(ea.year, ea.month, ea.day, ea.hour, ea.minute);
         _categoryId = entry.categoryId;
         _aiComment = entry.aiComment;
       }
@@ -79,9 +105,9 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
   Future<void> _save() async {
     final text = _text.text.trim();
     if (text.isEmpty && _title.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Запись пустая')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Запись пустая')));
       return;
     }
     setState(() {
@@ -110,8 +136,13 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
         try {
           // Контекст: до 5 записей до и до 5 после фокусной, отсортированы хронологически.
           // Так ИИ видит и историю, и то что произошло потом (важно для старых записей).
-          final ctxEntries = await repo.contextAround(masterKey: key, focus: saved);
-          final result = await ref.read(aiApiProvider).analyze(
+          final ctxEntries = await repo.contextAround(
+            masterKey: key,
+            focus: saved,
+          );
+          final result = await ref
+              .read(aiApiProvider)
+              .analyze(
                 focus: _toAi(saved),
                 context: ctxEntries.map(_toAi).toList(),
               );
@@ -126,13 +157,21 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
           );
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Анализ готов (${result.used}/${result.dailyLimit} за сегодня)')),
+              SnackBar(
+                content: Text(
+                  'Анализ готов (${result.used}/${result.dailyLimit} за сегодня)',
+                ),
+              ),
             );
           }
         } catch (e) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Запись сохранена, но анализ не получился: ${_humanError(e)}')),
+              SnackBar(
+                content: Text(
+                  'Запись сохранена, но анализ не получился: ${_humanError(e)}',
+                ),
+              ),
             );
           }
         }
@@ -143,14 +182,18 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
         ref.invalidate(entryProvider(widget.entryId!));
       }
       // Авто-синк (если включён) — фоновый, ошибки игнорируем.
-      final syncEnabled = await ref.read(authRepositoryProvider).isSyncEnabled();
+      final syncEnabled = await ref
+          .read(authRepositoryProvider)
+          .isSyncEnabled();
       if (syncEnabled) {
         ref.read(syncServiceProvider).syncOnce().ignore();
       }
       if (mounted) context.pop();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
       }
     } finally {
       if (mounted) {
@@ -163,10 +206,142 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
   }
 
   AiEntryDto _toAi(DiaryEntry e) => AiEntryDto(
-        date: e.entryAt.toUtc().toIso8601String(),
-        title: e.title,
-        text: e.text,
+    date: e.entryAt.toUtc().toIso8601String(),
+    title: e.title,
+    text: e.text,
+  );
+
+  Future<void> _toggleVoiceRecording() async {
+    if (_busy) return;
+    if (_recording) {
+      await _stopAndTranscribe();
+    } else {
+      await _startRecording();
+    }
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      final allowed = await _recorder.hasPermission();
+      if (!allowed) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Нет доступа к микрофону')),
+          );
+        }
+        return;
+      }
+
+      _recordingChunks.clear();
+      final stream = await _recorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: _voiceSampleRate,
+          numChannels: _voiceChannels,
+        ),
       );
+      await _recordingSub?.cancel();
+      _recordingSub = stream.listen((chunk) {
+        if (chunk.isNotEmpty) _recordingChunks.add(Uint8List.fromList(chunk));
+      });
+      _recordingTimer?.cancel();
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) {
+          setState(() => _recordingDuration += const Duration(seconds: 1));
+        }
+      });
+      if (mounted) {
+        setState(() {
+          _recording = true;
+          _recordingDuration = Duration.zero;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Не удалось начать запись: ${_humanError(e)}'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _stopAndTranscribe() async {
+    setState(() {
+      _busy = true;
+      _busyMessage = 'Расшифровываю...';
+    });
+
+    try {
+      await _recorder.stop();
+      _recordingTimer?.cancel();
+      await _recordingSub?.cancel();
+      _recordingSub = null;
+
+      final chunks = List<Uint8List>.from(_recordingChunks);
+      _recordingChunks.clear();
+      if (mounted) {
+        setState(() {
+          _recording = false;
+          _recordingDuration = Duration.zero;
+        });
+      }
+      if (chunks.isEmpty) {
+        throw StateError('пустая запись');
+      }
+
+      final wav = pcm16ToWav(
+        chunks: chunks,
+        sampleRate: _voiceSampleRate,
+        channels: _voiceChannels,
+      );
+      final text = await ref.read(aiApiProvider).transcribe(audioBytes: wav);
+      if (text.isEmpty) {
+        throw StateError('модель вернула пустой текст');
+      }
+      _insertTranscript(text);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Не удалось расшифровать голос: ${_humanError(e)}'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _busyMessage = null;
+          _recording = false;
+          _recordingDuration = Duration.zero;
+        });
+      }
+    }
+  }
+
+  void _insertTranscript(String transcript) {
+    final current = _text.text;
+    final selection = _text.selection;
+    final start = selection.isValid ? selection.start : current.length;
+    final end = selection.isValid ? selection.end : current.length;
+    final prefix = current.substring(0, start);
+    final suffix = current.substring(end);
+    final needsLeadingSpace =
+        prefix.isNotEmpty && !RegExp(r'\s$').hasMatch(prefix);
+    final needsTrailingSpace =
+        suffix.isNotEmpty && !RegExp(r'^\s').hasMatch(suffix);
+    final insert = [
+      if (needsLeadingSpace) ' ',
+      transcript.trim(),
+      if (needsTrailingSpace) ' ',
+    ].join();
+    _text.value = TextEditingValue(
+      text: '$prefix$insert$suffix',
+      selection: TextSelection.collapsed(offset: prefix.length + insert.length),
+    );
+  }
 
   Future<void> _delete() async {
     if (widget.entryId == null) return;
@@ -175,8 +350,14 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
       builder: (_) => AlertDialog(
         title: const Text('Удалить запись?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Удалить')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Удалить'),
+          ),
         ],
       ),
     );
@@ -201,12 +382,14 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-
       appBar: AppBar(
         title: Text(widget.entryId == null ? 'Новая запись' : 'Запись'),
         actions: [
           if (widget.entryId != null)
-            IconButton(icon: const Icon(Icons.delete_outline), onPressed: _busy ? null : _delete),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _busy ? null : _delete,
+            ),
         ],
       ),
       body: GradientBackground(
@@ -221,12 +404,19 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
                       Row(
                         children: [
                           OutlinedButton.icon(
-                            icon: const Icon(Icons.calendar_today_outlined, size: 18),
+                            icon: const Icon(
+                              Icons.calendar_today_outlined,
+                              size: 18,
+                            ),
                             label: Text(df.format(_entryAt)),
                             onPressed: _busy ? null : _pickDateTime,
                           ),
                           const SizedBox(width: 8),
-                          Expanded(child: _buildCategoryDropdown(categoriesAsync.valueOrNull ?? [])),
+                          Expanded(
+                            child: _buildCategoryDropdown(
+                              categoriesAsync.valueOrNull ?? [],
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -241,6 +431,8 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
                         enabled: !_busy,
                       ),
                       const Divider(height: 1),
+                      const SizedBox(height: 8),
+                      _buildVoiceToolbar(theme),
                       const SizedBox(height: 8),
                       TextField(
                         controller: _text,
@@ -259,16 +451,24 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
                       CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
                         value: _wantAnalyze,
-                        onChanged: _busy ? null : (v) => setState(() => _wantAnalyze = v ?? false),
-                        title: const Text('Проанализировать ИИ после сохранения'),
-                        subtitle: const Text('Учитывает 10 последних записей. Лимит: 3/день.'),
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _wantAnalyze = v ?? false),
+                        title: const Text(
+                          'Проанализировать ИИ после сохранения',
+                        ),
+                        subtitle: const Text(
+                          'Учитывает 10 последних записей. Лимит: 3/день.',
+                        ),
                         controlAffinity: ListTileControlAffinity.leading,
                       ),
                       const SizedBox(height: 8),
                       GradientButton(
                         onPressed: _busy ? null : _save,
                         loading: _busy,
-                        child: Text(_busy ? (_busyMessage ?? 'Сохраняю...') : 'Сохранить'),
+                        child: Text(
+                          _busy ? (_busyMessage ?? 'Сохраняю...') : 'Сохранить',
+                        ),
                       ),
                     ],
                   ),
@@ -302,7 +502,11 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
                     gradient: AppGradients.primary,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
+                  child: const Icon(
+                    Icons.auto_awesome,
+                    size: 16,
+                    color: Colors.white,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Text(
@@ -325,12 +529,49 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
     );
   }
 
+  Widget _buildVoiceToolbar(ThemeData theme) {
+    final minutes = _recordingDuration.inMinutes
+        .remainder(60)
+        .toString()
+        .padLeft(2, '0');
+    final seconds = _recordingDuration.inSeconds
+        .remainder(60)
+        .toString()
+        .padLeft(2, '0');
+    return Row(
+      children: [
+        IconButton.filledTonal(
+          tooltip: _recording
+              ? 'Остановить и расшифровать'
+              : 'Надиктовать текст',
+          onPressed: _busy ? null : _toggleVoiceRecording,
+          icon: Icon(_recording ? Icons.stop_rounded : Icons.mic_none_rounded),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            _recording ? 'Запись $minutes:$seconds' : 'Голос в текст',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: _recording
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
+              fontWeight: _recording ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildCategoryDropdown(List categories) {
     return DropdownButtonFormField<String?>(
       initialValue: _categoryId,
       decoration: const InputDecoration(labelText: 'Категория'),
       items: [
-        const DropdownMenuItem<String?>(value: null, child: Text('Без категории')),
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text('Без категории'),
+        ),
         for (final c in categories)
           DropdownMenuItem<String?>(value: c.id, child: Text(c.name)),
       ],
@@ -353,15 +594,34 @@ class _EntryEditorScreenState extends ConsumerState<EntryEditorScreen> {
     );
     if (time == null) return;
     setState(() {
-      _entryAt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _entryAt = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
     });
   }
 }
 
 String _humanError(Object e) {
+  if (e is DioException) {
+    final code = e.response?.statusCode;
+    final body = e.response?.data;
+    if (code == 429) {
+      final used = (body is Map ? body['used'] : null) ?? '';
+      final lim = (body is Map ? body['daily_limit'] : null) ?? 3;
+      return 'Дневной лимит ИИ исчерпан ($used/$lim). Завтра — снова доступно.';
+    }
+    if (code == 503) return 'ИИ временно недоступен';
+    if (code == 502) return 'Ошибка модели OpenRouter';
+    if (e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.connectionTimeout) {
+      return 'Нет соединения с сервером';
+    }
+    if (body is Map && body['error'] != null) return body['error'].toString();
+  }
   final s = e.toString();
-  if (s.contains('daily_limit_reached')) return 'Дневной лимит исчерпан (3/день)';
-  if (s.contains('ai_unavailable')) return 'AI пока не настроен на сервере';
-  if (s.contains('upstream_error')) return 'Ошибка модели OpenRouter';
   return s.length > 200 ? '${s.substring(0, 200)}…' : s;
 }

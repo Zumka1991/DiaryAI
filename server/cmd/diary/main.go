@@ -51,7 +51,7 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger) // лог входящих запросов
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(middleware.Timeout(60 * time.Second))
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})

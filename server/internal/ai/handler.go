@@ -3,12 +3,14 @@ package ai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/diaryai/server/internal/auth"
@@ -21,8 +23,10 @@ import (
 const (
 	dailyAnalyzeLimit = 3
 	defaultModel      = "anthropic/claude-haiku-4.5"
+	defaultVoiceModel = "google/gemini-2.5-flash-lite"
 	openRouterURL     = "https://openrouter.ai/api/v1/chat/completions"
 	maxOutputTokens   = 800
+	maxAudioBytes     = 10 << 20 // 10 MiB
 )
 
 type Service struct {
@@ -41,6 +45,7 @@ func New(pool *pgxpool.Pool, openRouterAPIKey string) *Service {
 
 func (s *Service) Routes(r chi.Router) {
 	r.Post("/analyze", s.handleAnalyze)
+	r.Post("/transcribe", s.handleTranscribe)
 }
 
 // --- DTO ---
@@ -62,6 +67,11 @@ type analyzeResponse struct {
 	Analysis      string `json:"analysis"`
 	Used          int    `json:"used"`
 	DailyLimit    int    `json:"daily_limit"`
+}
+
+type transcribeResponse struct {
+	Text  string `json:"text"`
+	Model string `json:"model"`
 }
 
 // --- handler ---
@@ -130,6 +140,64 @@ func (s *Service) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Service) handleTranscribe(w http.ResponseWriter, r *http.Request) {
+	if _, ok := auth.UserID(r.Context()); !ok {
+		httpx.WriteError(w, http.StatusUnauthorized, "no_user", "no user in context")
+		return
+	}
+
+	if s.openRouterAPIKey == "" {
+		httpx.WriteError(w, http.StatusServiceUnavailable, "ai_unavailable",
+			"Расшифровка голоса пока недоступна (на сервере не настроен ключ OpenRouter)")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxAudioBytes+1<<20)
+	if err := r.ParseMultipartForm(maxAudioBytes); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "bad_multipart", "не удалось прочитать аудио")
+		return
+	}
+
+	file, header, err := r.FormFile("audio")
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "missing_audio", "поле audio обязательно")
+		return
+	}
+	defer file.Close()
+
+	audioBytes, err := io.ReadAll(io.LimitReader(file, maxAudioBytes+1))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "read_audio_failed", "не удалось прочитать аудио")
+		return
+	}
+	if len(audioBytes) == 0 {
+		httpx.WriteError(w, http.StatusBadRequest, "empty_audio", "аудио пустое")
+		return
+	}
+	if len(audioBytes) > maxAudioBytes {
+		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "audio_too_large", "аудио больше 10 МБ")
+		return
+	}
+
+	model := r.FormValue("model")
+	if model == "" {
+		model = defaultVoiceModel
+	}
+	format := audioFormat(header.Filename, header.Header.Get("Content-Type"))
+
+	text, err := s.callOpenRouterAudio(r.Context(), model, audioBytes, format)
+	if err != nil {
+		slog.Error("openrouter audio call failed", "err", err)
+		httpx.WriteError(w, http.StatusBadGateway, "upstream_error", err.Error())
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, transcribeResponse{
+		Text:  text,
+		Model: model,
+	})
+}
+
 // --- usage ---
 
 func (s *Service) getUsage(ctx context.Context, uid, day string) (int, error) {
@@ -156,7 +224,7 @@ func (s *Service) incUsage(ctx context.Context, uid, day string) error {
 
 type orMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
 }
 
 type orRequest struct {
@@ -167,7 +235,10 @@ type orRequest struct {
 
 type orResponse struct {
 	Choices []struct {
-		Message orMessage `json:"message"`
+		Message struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"message"`
 	} `json:"choices"`
 	Error *struct {
 		Message string `json:"message"`
@@ -219,6 +290,106 @@ func (s *Service) callOpenRouter(ctx context.Context, model, userPrompt string) 
 		return "", errors.New("empty response from model")
 	}
 	return parsed.Choices[0].Message.Content, nil
+}
+
+func (s *Service) callOpenRouterAudio(ctx context.Context, model string, audio []byte, format string) (string, error) {
+	body := orRequest{
+		Model: model,
+		Messages: []orMessage{
+			{
+				Role: "user",
+				Content: []map[string]any{
+					{
+						"type": "text",
+						"text": "Расшифруй голосовое сообщение в текст. Верни только саму расшифровку на языке оригинала, без пояснений и кавычек.",
+					},
+					{
+						"type": "input_audio",
+						"input_audio": map[string]string{
+							"data":   base64.StdEncoding.EncodeToString(audio),
+							"format": format,
+						},
+					},
+				},
+			},
+		},
+		MaxTokens: 1200,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", openRouterURL, bytes.NewReader(raw))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.openRouterAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HTTP-Referer", "https://diaryai.ru")
+	req.Header.Set("X-Title", "DiaryAI")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("openrouter %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var parsed orResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+	if parsed.Error != nil {
+		return "", errors.New(parsed.Error.Message)
+	}
+	if len(parsed.Choices) == 0 {
+		return "", errors.New("empty response from model")
+	}
+	return parsed.Choices[0].Message.Content, nil
+}
+
+func audioFormat(filename, contentType string) string {
+	switch contentType {
+	case "audio/wav", "audio/x-wav", "audio/vnd.wave":
+		return "wav"
+	case "audio/mpeg", "audio/mp3":
+		return "mp3"
+	case "audio/mp4", "audio/x-m4a":
+		return "m4a"
+	case "audio/aac":
+		return "aac"
+	case "audio/ogg":
+		return "ogg"
+	case "audio/flac", "audio/x-flac":
+		return "flac"
+	}
+
+	switch {
+	case hasExt(filename, ".mp3"):
+		return "mp3"
+	case hasExt(filename, ".m4a"), hasExt(filename, ".mp4"):
+		return "m4a"
+	case hasExt(filename, ".aac"):
+		return "aac"
+	case hasExt(filename, ".ogg"):
+		return "ogg"
+	case hasExt(filename, ".flac"):
+		return "flac"
+	default:
+		return "wav"
+	}
+}
+
+func hasExt(filename, ext string) bool {
+	if len(filename) < len(ext) {
+		return false
+	}
+	return strings.EqualFold(filename[len(filename)-len(ext):], ext)
 }
 
 // --- prompt ---

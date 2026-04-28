@@ -118,11 +118,18 @@ class EntriesRepository {
     String aiComment = '',
   }) async {
     final entryId = id ?? _uuid.v4();
+    // Сохраняем дату как wall-clock (компоненты, выбранные пользователем),
+    // упаковано в UTC-DateTime для удобства хранения. На любом устройстве
+    // отобразится теми же часами:минутами, без сдвига по часовым поясам.
+    final wc = DateTime.utc(
+      entryAt.year, entryAt.month, entryAt.day,
+      entryAt.hour, entryAt.minute, entryAt.second,
+    );
     final payload = {
       'title': title,
       'text': text,
       'category_id': categoryId,
-      'entry_at': entryAt.toUtc().toIso8601String(),
+      'entry_at': wc.toIso8601String(),
       'ai_comment': aiComment,
     };
     final box = await _cipher.encryptJson(payload: payload, masterKey: masterKey);
@@ -137,11 +144,11 @@ class EntriesRepository {
       deviceId: deviceId,
       dirty: true,
       categoryId: categoryId,
-      entryAt: entryAt,
+      entryAt: wc,
     ));
     return DiaryEntry(
       id: entryId,
-      entryAt: entryAt,
+      entryAt: wc,
       categoryId: categoryId,
       title: title,
       text: text,
